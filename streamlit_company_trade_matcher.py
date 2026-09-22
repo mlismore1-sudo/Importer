@@ -17,19 +17,60 @@ st.set_page_config(
 @st.cache_data(show_spinner=False)
 def read_csv_bytes(raw: bytes) -> pd.DataFrame:
     attempts = [
-        {"sep": ",", "encoding": "utf-8-sig"},
-        {"sep": None, "engine": "python", "encoding": "utf-8-sig"},
-        {"sep": ",", "encoding": "cp1252"},
+        {"sep": ",", "encoding": "utf-8-sig", "engine": "c"},
+        {"sep": ";", "encoding": "utf-8-sig", "engine": "c"},
+        {"sep": "\t", "encoding": "utf-8-sig", "engine": "c"},
+        {"sep": "|", "encoding": "utf-8-sig", "engine": "c"},
+        {"sep": None, "encoding": "utf-8-sig", "engine": "python"},
+        {"sep": ",", "encoding": "cp1252", "engine": "python"},
     ]
-    last_error = None
+
+    errors = []
+
     for kwargs in attempts:
         try:
-            df = pd.read_csv(io.BytesIO(raw), **kwargs)
+            df = pd.read_csv(
+                io.BytesIO(raw),
+                **kwargs,
+                on_bad_lines="error",
+            )
             if len(df.columns) > 1:
                 return df
         except Exception as exc:
-            last_error = exc
-    raise ValueError(f"Could not read the uploaded CSV: {last_error}")
+            errors.append(f"{kwargs}: {exc}")
+
+    fallback_attempts = [
+        {"sep": ",", "encoding": "utf-8-sig"},
+        {"sep": ";", "encoding": "utf-8-sig"},
+        {"sep": "\t", "encoding": "utf-8-sig"},
+        {"sep": "|", "encoding": "utf-8-sig"},
+        {"sep": None, "encoding": "utf-8-sig"},
+        {"sep": ",", "encoding": "cp1252"},
+    ]
+
+    for kwargs in fallback_attempts:
+        try:
+            df = pd.read_csv(
+                io.BytesIO(raw),
+                engine="python",
+                **kwargs,
+                on_bad_lines="warn",
+            )
+            if len(df.columns) > 1:
+                st.warning(
+                    "The uploaded CSV contains one or more malformed rows. "
+                    "Those rows were skipped during import. Please check the "
+                    "original file if matches appear to be missing."
+                )
+                return df
+        except Exception as exc:
+            errors.append(f"fallback {kwargs}: {exc}")
+
+    raise ValueError(
+        "Could not read the uploaded CSV. The file has inconsistent columns, "
+        "an incorrect delimiter, or malformed quoting. Last errors: "
+        + " | ".join(errors[-3:])
+    )
 
 
 def read_upload(uploaded_file) -> pd.DataFrame:
@@ -65,6 +106,25 @@ def companies_house_profile(company_number: Any) -> str:
 def google_search(company_name: Any) -> str:
     name = display_search_name(company_name)
     return f"https://www.google.com/search?q={quote_plus(name)}" if name else ""
+
+
+def get_api_key() -> str:
+    try:
+        api_key = st.secrets["COMPANIES_HOUSE_API_KEY"]
+    except KeyError:
+        st.error(
+            "The Companies House API key is not configured. Add "
+            "COMPANIES_HOUSE_API_KEY to Streamlit Secrets."
+        )
+        st.stop()
+    except FileNotFoundError:
+        st.error("Streamlit Secrets are not available in this environment.")
+        st.stop()
+
+    if not isinstance(api_key, str) or not api_key.strip():
+        st.error("COMPANIES_HOUSE_API_KEY is empty in Streamlit Secrets.")
+        st.stop()
+    return api_key.strip()
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
@@ -133,11 +193,7 @@ with st.sidebar:
     )
 
     st.header("2. Enrichment")
-    api_key = st.text_input(
-        "Companies House API key",
-        type="password",
-        help="The key is used for this session and is not included in the downloaded CSV.",
-    )
+    st.info("The Companies House API key is managed through Streamlit Secrets.")
     max_directors = st.number_input(
         "Maximum directors to display",
         min_value=1,
@@ -191,12 +247,8 @@ if matches.empty:
     st.stop()
 
 if enrich:
-    if not api_key:
-        st.warning("Enter a Companies House API key to retrieve director information.")
-        matches["companies_house_profile"] = matches["company_number"].map(companies_house_profile)
-        matches["google_search"] = matches["company_name"].map(google_search)
-    else:
-        matches = enrich_matches(matches, api_key, int(max_directors))
+    api_key = get_api_key()
+    matches = enrich_matches(matches, api_key, int(max_directors))
 else:
     matches["companies_house_profile"] = matches["company_number"].map(companies_house_profile)
     matches["google_search"] = matches["company_name"].map(google_search)
