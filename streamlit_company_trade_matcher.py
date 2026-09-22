@@ -1,12 +1,12 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="CSV First Column Matcher", page_icon="📊", layout="centered")
+st.set_page_config(page_title="CSV Column A Matcher", page_icon="📊", layout="centered")
 
-st.title("CSV First Column Matcher")
+st.title("CSV Column A Matcher")
 st.write(
-    "Upload two CSV files. The app will compare the first column in each file and "
-    "display any values that appear in both."
+    "Upload two CSV files. The app will compare the first column (column A) in each "
+    "file, ignoring the header row, and display any values that appear in both."
 )
 
 # File uploaders
@@ -18,37 +18,53 @@ with col2:
 
 if file1 is not None and file2 is not None:
     try:
-        df1 = pd.read_csv(file1)
-        df2 = pd.read_csv(file2)
+        # Read both files:
+        # - skip the first physical row (assumed header)
+        # - do not treat any row as column names
+        # - skip malformed lines instead of erroring
+        df1 = pd.read_csv(
+            file1,
+            header=None,
+            skiprows=1,
+            on_bad_lines="skip",
+            engine="python",
+        )
+        df2 = pd.read_csv(
+            file2,
+            header=None,
+            skiprows=1,
+            on_bad_lines="skip",
+            engine="python",
+        )
     except Exception as e:
         st.error(f"Error reading one of the files: {e}")
     else:
         if df1.shape[1] == 0 or df2.shape[1] == 0:
             st.error("One of the CSV files has no columns.")
         else:
-            # Take the first column from each dataframe
-            col1_values = df1.iloc[:, 0].dropna().astype(str)
-            col2_values = df2.iloc[:, 0].dropna().astype(str)
+            # Take the first column (column index 0) from each dataframe
+            colA_1 = df1.iloc[:, 0].dropna().astype(str)
+            colA_2 = df2.iloc[:, 0].dropna().astype(str)
 
-            set1 = set(col1_values)
-            set2 = set(col2_values)
+            set1 = set(colA_1)
+            set2 = set(colA_2)
             matches = sorted(set1 & set2)
 
-            st.subheader("Matching values in first columns")
+            st.subheader("Values present in column A of both files")
 
             if matches:
-                st.success(f"Found {len(matches)} matching value(s).")
-                result_df = pd.DataFrame({"Matching values": matches})
+                st.success(f"Found {len(matches)} matching value(s) in column A.")
+                result_df = pd.DataFrame({"Matching values (column A)": matches})
                 st.dataframe(result_df, use_container_width=True)
             else:
-                st.info("No matching values found between the first columns.")
+                st.info("No matching values found in column A between the two files.")
 
-            # Optional: show a preview of the uploaded files
-            with st.expander("Preview first few rows of each CSV"):
-                st.markdown("**First CSV preview**")
-                st.dataframe(df1.head(), use_container_width=True)
+            # Optional: show a preview of column A from each CSV
+            with st.expander("Preview column A from each CSV"):
+                st.markdown("**First CSV – column A (first 10 values)**")
+                st.write(colA_1.head(10))
 
-                st.markdown("**Second CSV preview**")
-                st.dataframe(df2.head(), use_container_width=True)
+                st.markdown("**Second CSV – column A (first 10 values)**")
+                st.write(colA_2.head(10))
 else:
     st.info("Please upload both CSV files to run the comparison.")
