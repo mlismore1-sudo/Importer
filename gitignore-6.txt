@@ -1,44 +1,23 @@
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
 
 # Virtual environments
-.venv/
 venv/
-env/
+.env/
 
-# Packaging
-build/
-dist/
-*.egg-info/
-
-# Testing and coverage
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Local environment files
-.env
-.env.*
-!.env.example
-
-# Streamlit local state
+# Streamlit secrets
 .streamlit/secrets.toml
 
-# Operating system files
+# OS files
 .DS_Store
 Thumbs.db
 
-# IDE files
-.vscode/
-.idea/
+# Python packaging
+*.egg-info/
+build/
+dist/
 
-# Local data and exports
-*.csv
-*.xlsx
-*.xls
-*.json
-output/
+# Jupyter and other caches
+.ipynb_checkpoints/
+.pytest_cache/
