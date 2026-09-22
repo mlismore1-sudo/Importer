@@ -8,7 +8,8 @@ st.set_page_config(page_title="CSV Column A Matcher + Enrichment", page_icon="ðŸ
 st.title("CSV Column A Matcher + Companies House Enrichment")
 st.caption(
     "Upload two CSV files, find companies present in both, and enrich them with "
-    "Companies House officer data, profile links, and Google search shortcuts."
+    "Companies House officer data, incorporation date, profile links, and Google "
+    "search shortcuts."
 )
 
 # Sidebar for settings
@@ -53,7 +54,7 @@ def fetch_officer_enrichment(company_number: str, api_key: str, max_directors: i
     headers = {"Accept": "application/json"}
 
     try:
-        resp = requests.get(url, auth=(api_key, ""), headers=headers, timeout=10)
+        resp = requests.get(url, auth=(api_key.strip(), ""), headers=headers, timeout=10)
     except Exception as e:
         return {"director_count": None, "directors": [], "error": f"request error: {e}"}
 
@@ -104,6 +105,32 @@ def fetch_officer_enrichment(company_number: str, api_key: str, max_directors: i
     )
 
     return {"director_count": director_count, "directors": directors, "error": None}
+
+
+def fetch_incorporation_date(company_number: str, api_key: str):
+    """Fetch incorporation date (date_of_creation) from Companies House company profile.
+
+    Returns a string YYYY-MM-DD or None, plus optional error.
+    """
+    company_number = str(company_number).strip()
+
+    profile_url = "https://api.company-information.service.gov.uk/company/{company_number}".format(
+        company_number=company_number
+    )
+    headers = {"Accept": "application/json"}
+
+    try:
+        resp = requests.get(profile_url, auth=(api_key.strip(), ""), headers=headers, timeout=10)
+    except Exception as e:
+        return None, f"request error: {e}"
+
+    if resp.status_code != 200:
+        return None, f"status {resp.status_code}: {resp.text[:200]}"
+
+    data = resp.json()
+    # date_of_creation is the incorporation date field
+    incorp = data.get("date_of_creation")
+    return incorp, None
 
 
 matched_rows = None
@@ -186,8 +213,8 @@ if matched_rows is not None and not matched_rows.empty:
         enrich_button = st.button("Enrich results")
     with enrich_col2:
         st.markdown(
-            "Once enriched, you will see clickable links to Companies House and Google "
-            "search for each company."
+            "Once enriched, you will see director data, date of incorporation, and "
+            "clickable links to Companies House and Google for each company."
         )
 
     if enrich_button:
@@ -203,13 +230,14 @@ if matched_rows is not None and not matched_rows.empty:
                 company_name = str(row["Company name"])
                 company_number = str(row["Company number"]).strip()
 
+                # Officers (directors)
                 enrichment = fetch_officer_enrichment(company_number, api_key)
                 error = enrichment.get("error")
                 director_count = enrichment.get("director_count")
                 directors = enrichment.get("directors", [])
 
                 if error:
-                    st.warning(f"{company_number}: {error}")
+                    st.warning(f"Officers {company_number}: {error}")
 
                 director_data = {}
                 for i in range(4):
@@ -219,6 +247,11 @@ if matched_rows is not None and not matched_rows.empty:
                     else:
                         director_data[f"Director {i+1} name"] = None
                         director_data[f"Director {i+1} profile"] = None
+
+                # Company profile: date of incorporation
+                incorp_date, incorp_error = fetch_incorporation_date(company_number, api_key)
+                if incorp_error:
+                    st.warning(f"Profile {company_number}: {incorp_error}")
 
                 # Companies House company profile link
                 ch_company_url = (
@@ -236,6 +269,7 @@ if matched_rows is not None and not matched_rows.empty:
                     {
                         "Company name": company_name,
                         "Company number": company_number,
+                        "Date of incorporation": incorp_date,
                         "Director count": director_count,
                         **director_data,
                         "Companies House profile": ch_company_url,
@@ -261,6 +295,9 @@ if matched_rows is not None and not matched_rows.empty:
                     ),
                     "Company number": st.column_config.Column(
                         label="Number", width="small", help="Registered company number"
+                    ),
+                    "Date of incorporation": st.column_config.Column(
+                        label="Incorporated", help="Date of creation from company profile", width="medium"
                     ),
                     "Director count": st.column_config.NumberColumn(
                         label="Directors", help="Active directors count", width="small"
