@@ -169,43 +169,52 @@ if matched_rows is not None and not matched_rows.empty:
         if not api_key:
             st.error("Please enter your Companies House API key to enrich results.")
         else:
-            with st.spinner("Enriching results from Companies House..."):
-                enrichment_rows = []
-                for _, row in matched_rows.iterrows():
-                    company_name = str(row["Company name"])
-                    company_number = str(row["Company number"])
+            total = len(matched_rows)
+            progress_text = "Enrichment in progress. Please wait."
+            progress_bar = st.progress(0, text=progress_text)
 
-                    enrichment = fetch_officer_enrichment(company_number, api_key)
-                    director_count = enrichment.get("director_count")
-                    directors = enrichment.get("directors", [])
+            enrichment_rows = []
+            for idx, (_, row) in enumerate(matched_rows.iterrows(), start=1):
+                company_name = str(row["Company name"])
+                company_number = str(row["Company number"])
 
-                    # Prepare up to 4 director name/profile pairs
-                    director_data = {}
-                    for i in range(4):
-                        if i < len(directors):
-                            director_data[f"Director {i+1} name"] = directors[i].get("name")
-                            director_data[f"Director {i+1} profile"] = directors[i].get("profile_url")
-                        else:
-                            director_data[f"Director {i+1} name"] = None
-                            director_data[f"Director {i+1} profile"] = None
+                enrichment = fetch_officer_enrichment(company_number, api_key)
+                director_count = enrichment.get("director_count")
+                directors = enrichment.get("directors", [])
 
-                    # Google search link without Ltd/Limited
-                    clean_name = clean_company_name_for_search(company_name)
-                    google_url = None
-                    if clean_name:
-                        google_url = "https://www.google.com/search?q=" + quote_plus(clean_name)
+                # Prepare up to 4 director name/profile pairs
+                director_data = {}
+                for i in range(4):
+                    if i < len(directors):
+                        director_data[f"Director {i+1} name"] = directors[i].get("name")
+                        director_data[f"Director {i+1} profile"] = directors[i].get("profile_url")
+                    else:
+                        director_data[f"Director {i+1} name"] = None
+                        director_data[f"Director {i+1} profile"] = None
 
-                    enrichment_rows.append(
-                        {
-                            "Company name": company_name,
-                            "Company number": company_number,
-                            "Director count": director_count,
-                            **director_data,
-                            "Google search": google_url,
-                        }
-                    )
+                # Google search link without Ltd/Limited
+                clean_name = clean_company_name_for_search(company_name)
+                google_url = None
+                if clean_name:
+                    google_url = "https://www.google.com/search?q=" + quote_plus(clean_name)
 
-                enriched_df = pd.DataFrame(enrichment_rows)
+                enrichment_rows.append(
+                    {
+                        "Company name": company_name,
+                        "Company number": company_number,
+                        "Director count": director_count,
+                        **director_data,
+                        "Google search": google_url,
+                    }
+                )
 
-                st.success("Enrichment complete.")
-                st.dataframe(enriched_df, use_container_width=True)
+                # Update progress bar
+                percent_complete = int(idx / total * 100)
+                progress_bar.progress(percent_complete, text=progress_text)
+
+            progress_bar.empty()
+
+            enriched_df = pd.DataFrame(enrichment_rows)
+
+            st.success("Enrichment complete.")
+            st.dataframe(enriched_df, use_container_width=True)
