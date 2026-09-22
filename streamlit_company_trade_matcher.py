@@ -1,198 +1,54 @@
-import re
-from typing import Any
-
-import pandas as pd
 import streamlit as st
+import pandas as pd
 
+st.set_page_config(page_title="CSV First Column Matcher", page_icon="📊", layout="centered")
 
-st.set_page_config(
-    page_title="Company Name Matcher",
-    page_icon="🔎",
-    layout="wide",
-)
-
-
-def normalise_name(value: Any) -> str:
-    """
-    Create a comparison key for a company name.
-
-    This keeps the original values unchanged for display but makes matching
-    tolerant of case, punctuation, LTD/LIMITED, ampersands, and whitespace.
-    """
-    if pd.isna(value):
-        return ""
-
-    text = str(value)
-    text = text.replace("\u00a0", " ")
-    text = text.strip().upper()
-    text = text.replace("&", " AND ")
-    text = re.sub(r"\bLIMITED\b|\bLTD\b", " ", text)
-    text = re.sub(r"[^A-Z0-9]+", " ", text)
-    text = re.sub(r"\s+", " ", text)
-
-    return text.strip()
-
-
-st.title("Company Name Matcher")
-
+st.title("CSV First Column Matcher")
 st.write(
-    "This app compares the complete first column of the first uploaded CSV "
-    "with the complete first column of the second uploaded CSV. Matching "
-    "companies are returned from the first file."
+    "Upload two CSV files. The app will compare the first column in each file and "
+    "display any values that appear in both."
 )
 
+# File uploaders
+col1, col2 = st.columns(2)
+with col1:
+    file1 = st.file_uploader("Upload first CSV", type=["csv"], key="file1")
+with col2:
+    file2 = st.file_uploader("Upload second CSV", type=["csv"], key="file2")
 
-with st.sidebar:
-    st.header("Upload files")
+if file1 is not None and file2 is not None:
+    try:
+        df1 = pd.read_csv(file1)
+        df2 = pd.read_csv(file2)
+    except Exception as e:
+        st.error(f"Error reading one of the files: {e}")
+    else:
+        if df1.shape[1] == 0 or df2.shape[1] == 0:
+            st.error("One of the CSV files has no columns.")
+        else:
+            # Take the first column from each dataframe
+            col1_values = df1.iloc[:, 0].dropna().astype(str)
+            col2_values = df2.iloc[:, 0].dropna().astype(str)
 
-    first_file = st.file_uploader(
-        "1. Companies House CSV",
-        type=["csv"],
-        help=(
-            "The first column must contain company names. "
-            "The second column must contain company numbers."
-        ),
-    )
+            set1 = set(col1_values)
+            set2 = set(col2_values)
+            matches = sorted(set1 & set2)
 
-    second_file = st.file_uploader(
-        "2. UK Trade Info CSV",
-        type=["csv"],
-        help="The first column must contain company names.",
-    )
+            st.subheader("Matching values in first columns")
 
+            if matches:
+                st.success(f"Found {len(matches)} matching value(s).")
+                result_df = pd.DataFrame({"Matching values": matches})
+                st.dataframe(result_df, use_container_width=True)
+            else:
+                st.info("No matching values found between the first columns.")
 
-if first_file is None or second_file is None:
-    st.info("Upload both CSV files in the sidebar to begin.")
-    st.stop()
+            # Optional: show a preview of the uploaded files
+            with st.expander("Preview first few rows of each CSV"):
+                st.markdown("**First CSV preview**")
+                st.dataframe(df1.head(), use_container_width=True)
 
-
-try:
-    first_dataframe = pd.read_csv(
-        first_file,
-        engine="python",
-        on_bad_lines="warn",
-    )
-
-    second_dataframe = pd.read_csv(
-        second_file,
-        engine="python",
-        on_bad_lines="warn",
-    )
-
-except Exception as exc:
-    st.error(f"Could not read the uploaded CSV: {exc}")
-    st.stop()
-
-
-if first_dataframe.shape[1] < 2:
-    st.error(
-        "The first CSV must contain at least two columns. "
-        "Column A must contain company names and column B must contain "
-        "company numbers."
-    )
-    st.stop()
-
-
-if second_dataframe.shape[1] < 1:
-    st.error(
-        "The second CSV must contain at least one column. "
-        "Column A must contain company names."
-    )
-    st.stop()
-
-
-first_name_column = first_dataframe.columns[0]
-first_number_column = first_dataframe.columns[1]
-second_name_column = second_dataframe.columns[0]
-
-
-first_name_values = first_dataframe.iloc[:, 0].map(normalise_name)
-second_name_values = second_dataframe.iloc[:, 0].map(normalise_name)
-
-
-second_column_values = {
-    value
-    for value in second_name_values.tolist()
-    if value
-}
-
-
-match_mask = first_name_values.isin(second_column_values)
-
-
-matches = first_dataframe.loc[
-    match_mask,
-    [first_name_column, first_number_column],
-].copy()
-
-
-matches.columns = [
-    "company_name",
-    "company_number",
-]
-
-
-matches = matches.drop_duplicates(
-    subset=["company_number"]
-)
-
-
-col1, col2, col3 = st.columns(3)
-
-col1.metric(
-    "Rows in first file",
-    f"{len(first_dataframe):,}",
-)
-
-col2.metric(
-    "Rows in second file",
-    f"{len(second_dataframe):,}",
-)
-
-col3.metric(
-    "Matched companies",
-    f"{len(matches):,}",
-)
-
-
-st.caption(
-    f"Comparing the complete first column "
-    f"'{first_name_column}' from the first file with the complete first "
-    f"column '{second_name_column}' from the second file."
-)
-
-
-if matches.empty:
-    st.warning(
-        "No matching company names were found between the two columns."
-    )
-
+                st.markdown("**Second CSV preview**")
+                st.dataframe(df2.head(), use_container_width=True)
 else:
-    st.subheader("Matching companies")
-
-    st.dataframe(
-        matches,
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    st.download_button(
-        "Download matches as CSV",
-        data=matches.to_csv(index=False).encode("utf-8-sig"),
-        file_name="matching_companies.csv",
-        mime="text/csv",
-    )
-
-
-with st.expander("Matching logic"):
-    st.write(
-        "The entire first column of each uploaded file is used. Every "
-        "non-empty value in the second file's first column is placed into "
-        "a set. Every value in the first file's first column is then checked "
-        "against that set. If it exists, that first-file row is returned."
-    )
-
-    st.write(
-        "Matching ignores differences in capitalisation, punctuation, "
-        "LTD/LIMITED, ampersands, and repeated spaces."
-    )
+    st.info("Please upload both CSV files to run the comparison.")
