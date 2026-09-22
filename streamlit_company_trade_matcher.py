@@ -5,7 +5,11 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Company Name Matcher", page_icon="🔎", layout="wide")
+st.set_page_config(
+    page_title="Company Name Matcher",
+    page_icon="🔎",
+    layout="wide",
+)
 
 
 @st.cache_data(show_spinner=False)
@@ -17,7 +21,6 @@ def read_csv_bytes(raw: bytes) -> pd.DataFrame:
         {"sep": "|", "encoding": "utf-8-sig"},
         {"sep": ",", "encoding": "cp1252"},
     ]
-
     errors = []
 
     for options in attempts:
@@ -28,12 +31,124 @@ def read_csv_bytes(raw: bytes) -> pd.DataFrame:
                 on_bad_lines="warn",
                 **options,
             )
-            if len(dataframe.columns) >= 1:
+            if dataframe.shape[1] >= 1:
                 return dataframe
         except Exception as exc:
             errors.append(str(exc))
 
     raise ValueError(
+        "Could not read the uploaded CSV. Please check that it is a valid CSV file. "
+        + " | ".join(errors[-2:])
+    )
+
+
+def read_upload(uploaded_file) -> pd.DataFrame:
+    return read_csv_bytes(uploaded_file.getvalue())
+
+
+def normalise_name(value: Any) -> str:
+    if pd.isna(value):
+        return ""
+
+    text = str(value).replace("\u00a0", " ").strip().upper()
+    text = text.replace("&", " AND ")
+    text = re.sub(r"\bLIMITED\b|\bLTD\b", " ", text)
+    text = re.sub(r"[^A-Z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+st.title("Company Name Matcher")
+st.write(
+    "This app compares the entire first column of the first upload with the entire "
+    "first column of the second upload. Matching companies are returned from the first file."
+)
+
+with st.sidebar:
+    st.header("Upload files")
+    first_file = st.file_uploader(
+        "1. Companies House CSV",
+        type=["csv"],
+        help="The first column must contain company names. The second column must contain company numbers.",
+    )
+    second_file = st.file_uploader(
+        "2. UK Trade Info CSV",
+        type=["csv"],
+        help="The first column must contain company names.",
+    )
+
+if not first_file or not second_file:
+    st.info("Upload both CSV files in the sidebar to begin.")
+    st.stop()
+
+try:
+    first_dataframe = read_upload(first_file)
+    second_dataframe = read_upload(second_file)
+except ValueError as exc:
+    st.error(str(exc))
+    st.stop()
+
+if first_dataframe.shape[1] < 2:
+    st.error(
+        "The first CSV must contain at least two columns. The first column is used "
+        "for company names and the second column is used for company numbers."
+    )
+    st.stop()
+
+if second_dataframe.shape[1] < 1:
+    st.error("The second CSV must contain at least one column for company names.")
+    st.stop()
+
+first_name_column = first_dataframe.columns[0]
+first_number_column = first_dataframe.columns[1]
+second_name_column = second_dataframe.columns[0]
+
+first_name_values = first_dataframe.iloc[:, 0].map(normalise_name)
+second_name_values = second_dataframe.iloc[:, 0].map(normalise_name)
+
+second_column_values = set(
+    value for value in second_name_values.tolist() if value
+)
+
+match_mask = first_name_values.isin(second_column_values)
+
+matches = first_dataframe.loc[
+    match_mask,
+    [first_name_column, first_number_column],
+].copy()
+
+matches.columns = ["company_name", "company_number"]
+matches = matches.drop_duplicates(subset=["company_number"])
+
+col1, col2, col3 = st.columns(3)
+col1.metric("Rows in first file", f"{len(first_dataframe):,}")
+col2.metric("Rows in second file", f"{len(second_dataframe):,}")
+col3.metric("Matched companies", f"{len(matches):,}")
+
+st.caption(
+    f"Comparing the complete first column '{first_name_column}' from the first file "
+    f"with the complete first column '{second_name_column}' from the second file."
+)
+
+if matches.empty:
+    st.warning("No matching company names were found between the two columns.")
+else:
+    st.subheader("Matching companies")
+    st.dataframe(matches, use_container_width=True, hide_index=True)
+
+    st.download_button(
+        "Download matches as CSV",
+        data=matches.to_csv(index=False).encode("utf-8-sig"),
+        file_name="matching_companies.csv",
+        mime="text/csv",
+    )
+
+with st.expander("Matching logic"):
+    st.write(
+        "The first column of each uploaded file is extracted as a complete column. "
+        "Every non-empty value in the second file's first column is placed into a set. "
+        "Every value in the first file's first column is then checked against that set. "
+        "Rows from the first file whose company name exists in the second column are displayed."
+    )
         "Could not read the uploaded CSV. Please check that it is a valid CSV file. "
         + " | ".join(errors[-2:])
     )
